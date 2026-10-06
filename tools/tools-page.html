@@ -1,0 +1,877 @@
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+<div id="yt-tools-root">
+  <div class="yt-hero">
+    <h1>Make more. <span class="yt-red">Switch tabs less.</span></h1>
+    <p>42 free tools that run entirely in your browser. No sign-up, no uploads to any server — your files never leave your device.</p>
+    <div class="yt-search"><span class="yt-sic">🔍</span><input id="yt-q" type="text" placeholder="Search tools… e.g. thumbnail, pdf, qr" autocomplete="off"></div>
+  </div>
+  <div class="yt-pills" id="yt-pills"></div>
+  <div class="yt-count" id="yt-count"></div>
+  <div class="yt-grid" id="yt-grid"></div>
+  <div class="yt-foot">All tools work 100% client-side. Nothing is uploaded anywhere.</div>
+  <div class="yt-ov" id="yt-ov">
+    <div class="yt-md">
+      <div class="yt-mh"><h2 id="yt-mt"></h2><button class="yt-x" id="yt-mx" aria-label="Close">✕</button></div>
+      <div class="yt-mb" id="yt-mb"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+/* ============ helpers ============ */
+function $(s,r){return (r||document).querySelector(s);}
+function $$ (s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s));}
+function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function lab(t){return '<label class="yt-lab">'+t+'</label>';}
+function inp(id,ph,val,type){return '<input class="yt-in" id="'+id+'" type="'+(type||"text")+'" placeholder="'+esc(ph||"")+'" value="'+esc(val==null?"":val)+'">';}
+function ta(id,ph,rows){return '<textarea class="yt-ta" id="'+id+'" rows="'+(rows||4)+'" placeholder="'+esc(ph||"")+'"></textarea>';}
+function btn(t,fn,id){return '<button class="yt-btn"'+(id?' id="'+id+'"':'')+'>'+t+'</button>';}
+function ghost(t,fn){return '<button class="yt-ghost" data-g="'+t+'">'+t+'</button>';}
+function note(t){return '<div class="yt-note">'+t+'</div>';}
+function resBox(id){return '<div class="yt-res" id="'+id+'" style="display:none"></div>';}
+function showRes(id,html){var e=$('#'+id);if(e){e.style.display='block';e.innerHTML=html;}}
+function copyTxt(t,bt){
+  function done(){if(bt){var o=bt.getAttribute('data-o')||bt.textContent;bt.setAttribute('data-o',o);bt.textContent='Copied ✓';setTimeout(function(){bt.textContent=o;},1400);}}
+  function fb(){var x=document.createElement('textarea');x.value=t;x.style.position='fixed';x.style.opacity='0';document.body.appendChild(x);x.select();try{document.execCommand('copy');done();}catch(e){}x.remove();}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done).catch(fb);}else{fb();}
+}
+function dl(blob,name){var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},3000);}
+function fmtB(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(2)+' MB';}
+function loadImg(file){return new Promise(function(res,rej){var u=URL.createObjectURL(file);var i=new Image();i.onload=function(){URL.revokeObjectURL(u);res(i);};i.onerror=rej;i.src=u;});}
+function ytId(u){u=String(u||'').trim();var m=u.match(/(?:youtube\.com\/(?:watch\?[^#]*v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);if(m)return m[1];if(/^[A-Za-z0-9_-]{11}$/.test(u))return u;return null;}
+function ytThumb(id,q){return 'https://i.ytimg.com/vi/'+id+'/'+q+'.jpg';}
+/* ============ modal / grid ============ */
+var ov=$('#yt-ov'),mt=$('#yt-mt'),mb=$('#yt-mb');
+function openTool(t){mt.textContent=t.name;mb.innerHTML='';mb.onkeydown=null;try{t.build(mb);}catch(e){mb.innerHTML='<div class="yt-res">Error loading tool: '+esc(e.message)+'</div>';}ov.classList.add('yt-show');document.body.style.overflow='hidden';}
+function closeTool(){ov.classList.remove('yt-show');document.body.style.overflow='';mb.innerHTML='';mb.onkeydown=null;}
+$('#yt-mx').addEventListener('click',closeTool);
+ov.addEventListener('click',function(e){if(e.target===ov)closeTool();});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&ov.classList.contains('yt-show'))closeTool();});
+var CATS=[['all','All'],['youtube','YouTube'],['media','Media'],['docs','Documents'],['prod','Productivity'],['fin','Finance'],['web','Web & SEO']];
+var activeCat='all';
+function renderPills(){var p=$('#yt-pills');p.innerHTML='';CATS.forEach(function(c){var b=document.createElement('button');b.className='yt-pill'+(c[0]===activeCat?' yt-on':'');b.textContent=c[1];b.onclick=function(){activeCat=c[0];renderPills();renderGrid();};p.appendChild(b);});}
+function renderGrid(){
+  var q=$('#yt-q').value.toLowerCase().trim(),g=$('#yt-grid');g.innerHTML='';
+  var list=TOOLS.filter(function(t){return (activeCat==='all'||t.cat===activeCat)&&((t.name+' '+t.tag+' '+t.cat).toLowerCase().indexOf(q)>=0);});
+  $('#yt-count').textContent=list.length+' tool'+(list.length===1?'':'s');
+  list.forEach(function(t){
+    var d=document.createElement('div');d.className='yt-card';
+    d.innerHTML='<div class="yt-ico">'+t.icon+'</div><h3>'+esc(t.name)+'</h3><p>'+esc(t.tag)+'</p><span class="yt-arrow">→</span>';
+    d.onclick=function(){openTool(t);};g.appendChild(d);
+  });
+  if(!list.length)g.innerHTML='<div style="grid-column:1/-1;text-align:center;color:#999;padding:40px;">No tools match your search.</div>';
+}
+/* ================= TOOLS ================= */
+const TOOLS=[
+/* ---------- YOUTUBE ---------- */
+{id:'yt-tags',cat:'youtube',icon:'🏷️',name:'Tag Generator',tag:'SEO tags + hashtags for any video topic',build:function(b){
+  b.innerHTML=lab('Video topic or title')+inp('tg-t','e.g. how to bake chocolate cake')+lab('Niche (optional)')+inp('tg-n','e.g. cooking')+btn('Generate Tags','','tg-go')+resBox('tg-r');
+  $('#tg-go',b).onclick=function(){
+    var topic=$('#tg-t',b).value.trim(),niche=$('#tg-n',b).value.trim().toLowerCase();
+    if(!topic){showRes('tg-r','Please enter a topic first.');return;}
+    var t=topic.toLowerCase().replace(/[^\w\s-]/g,'');
+    var set=[];
+    function add(s){s=s.trim();if(s&&set.indexOf(s)<0)set.push(s);}
+    add(t);
+    [t+' video',t+' tutorial','how to '+t,'best '+t,t+' 2026',t+' for beginners',t+' tips and tricks',t+' step by step',t+' full guide',t+' review',t+' explained',t+' must watch',t+' in hindi'].forEach(add);
+    t.split(/\s+/).forEach(function(w){if(w.length>2)add(w);});
+    if(niche){add(niche);add(t+' '+niche);}
+    var tags=set.slice(0,30);
+    var hw=t.split(/\s+/).filter(function(w){return w.length>2;}).map(function(w){return w.charAt(0).toUpperCase()+w.slice(1);});
+    var hts=['#'+hw.join('')];hw.forEach(function(w){hts.push('#'+w);});
+    showRes('tg-r','<b>'+tags.length+' tags</b> <span class="yt-note">('+tags.join(', ').length+'/500 chars)</span><br><br>'+
+      tags.map(function(x){return '<span class="yt-tagchip">'+esc(x)+'</span>';}).join('')+
+      '<br><br><b>Hashtags:</b><br>'+hts.map(function(x){return '<span class="yt-tagchip">'+esc(x)+'</span>';}).join('')+
+      '<br><br><button class="yt-ghost" id="tg-cp">Copy Tags</button> <button class="yt-ghost" id="tg-cph">Copy Hashtags</button>');
+    $('#tg-cp',b).onclick=function(){copyTxt(tags.join(', '),this);};
+    $('#tg-cph',b).onclick=function(){copyTxt(hts.join(' '),this);};
+  };
+}},
+{id:'yt-desc',cat:'youtube',icon:'📝',name:'Description Writer',tag:'Full video description template in seconds',build:function(b){
+  b.innerHTML=lab('Video title')+inp('dw-title','e.g. How to Bake Chocolate Cake')+lab('Topic (1 line)')+inp('dw-topic','e.g. easy chocolate cake recipe')+lab('Channel name')+inp('dw-ch','e.g. My Kitchen')+lab('Links (one per line, optional)')+ta('dw-links','https://…',2)+btn('Write Description','','dw-go')+resBox('dw-r');
+  $('#dw-go',b).onclick=function(){
+    var title=$('#dw-title',b).value.trim()||'My New Video';
+    var topic=$('#dw-topic',b).value.trim()||title;
+    var ch=$('#dw-ch',b).value.trim()||'this channel';
+    var links=$('#dw-links',b).value.trim().split('\n').filter(function(x){return x.trim();});
+    var ht=topic.toLowerCase().split(/\s+/).filter(function(w){return w.length>2;}).slice(0,3).map(function(w){return '#'+w.charAt(0).toUpperCase()+w.slice(1);}).join(' ');
+    var d=title+'\n\n'+topic.charAt(0).toUpperCase()+topic.slice(1)+' — everything you need to know in one video. Watch till the end for the best tips!\n\n📌 In this video:\n• What '+topic+' is all about\n• Step-by-step walkthrough\n• Common mistakes to avoid\n• Pro tips you won\'t find elsewhere\n\n⏱ Chapters:\n0:00 Intro\n1:30 Getting started\n5:00 Main tutorial\n9:00 Final tips\n\n🔔 Subscribe to '+ch+' for more '+topic+' videos!\n\n🔗 Useful links:\n'+(links.length?links.map(function(l){return '• '+l.trim();}).join('\n'):'• (add your links here)')+'\n\n'+ht+' #youtube';
+    showRes('dw-r','<pre>'+esc(d)+'</pre><br><button class="yt-ghost" id="dw-cp">Copy Description</button> <span class="yt-note">'+d.length+' characters</span>');
+    $('#dw-cp',b).onclick=function(){copyTxt(d,this);};
+  };
+}},
+{id:'yt-kw',cat:'youtube',icon:'💡',name:'Keyword Ideas',tag:'Long-tail keyword variations from a seed word',build:function(b){
+  b.innerHTML=lab('Seed keyword')+inp('kw-s','e.g. weight loss')+btn('Get Ideas','','kw-go')+resBox('kw-r');
+  $('#kw-go',b).onclick=function(){
+    var s=$('#kw-s',b).value.trim().toLowerCase();if(!s){showRes('kw-r','Enter a seed keyword.');return;}
+    var pre=['how to','best','top 10','top 5','what is','why','easy','quick','ultimate guide to','beginner guide to'];
+    var post=['for beginners','2026','step by step','at home','for free','explained','tips','tricks','tutorial','review','vs','in hindi','full video','for students'];
+    var out=[];
+    pre.forEach(function(p){out.push(p+' '+s);});
+    post.forEach(function(p){out.push(s+' '+p);});
+    showRes('kw-r','<b>'+out.length+' keyword ideas</b><br><br>'+out.map(function(x){return '<span class="yt-tagchip">'+esc(x)+'</span>';}).join('')+'<br><br><button class="yt-ghost" id="kw-cp">Copy All</button>');
+    $('#kw-cp',b).onclick=function(){copyTxt(out.join('\n'),this);};
+  };
+}},
+{id:'yt-cap',cat:'youtube',icon:'💬',name:'Caption Ideator',tag:'Catchy caption ideas for your videos & posts',build:function(b){
+  b.innerHTML=lab('Topic')+inp('ci-t','e.g. morning routine')+lab('Vibe')+'<select class="yt-in" id="ci-v"><option>Funny</option><option>Motivational</option><option>Question</option><option>Call to action</option></select>'+btn('Ideate','','ci-go')+resBox('ci-r');
+  var bank={
+    'Funny':['POV: {t} but make it chaotic 😅','Nobody:\nMe: {t} at 3am','{T} — expectation vs reality','Warning: {t} may cause extreme happiness'],
+    'Motivational':['Small steps. Big {t} energy. 💪','Your future self will thank you for {t} today.','Discipline beats motivation. Especially with {t}.','Start where you are. {T} starts now.'],
+    'Question':['What is your #1 tip for {t}? 👇','Hot take: {t} is overrated. Agree?','If you could only pick one {t} hack, what would it be?','Rate my {t} from 1 to 10 👀'],
+    'Call to action':['Save this for later — you will need these {t} tips! 📌','Tag someone who needs to see this {t} 👇','Follow for daily {t} content 🔔','Comment YES if you are trying {t} this week!']
+  };
+  $('#ci-go',b).onclick=function(){
+    var t=$('#ci-t',b).value.trim()||'this',v=$('#ci-v',b).value;
+    var T=t.charAt(0).toUpperCase()+t.slice(1);
+    var caps=bank[v].map(function(c){return c.replace(/\{t\}/g,t).replace(/\{T\}/g,T);});
+    showRes('ci-r',caps.map(function(c,i){return '<div style="margin-bottom:10px;padding:10px;background:#fff;border-radius:8px;">'+esc(c).replace(/\n/g,'<br>')+'<br><button class="yt-ghost" data-ci="'+i+'">Copy</button></div>';}).join(''));
+    $$('#ci-r [data-ci]',b).forEach(function(x){x.onclick=function(){copyTxt(caps[+x.getAttribute('data-ci')],x);};});
+  };
+}},
+{id:'yt-thumb',cat:'youtube',icon:'🖼️',name:'Thumbnail Finder',tag:'Grab any YouTube thumbnail in all sizes',build:function(b){
+  b.innerHTML=lab('YouTube video URL or ID')+inp('th-u','e.g. https://youtu.be/… or 11-char video ID')+btn('Find Thumbnails','','th-go')+resBox('th-r');
+  $('#th-go',b).onclick=function(){
+    var id=ytId($('#th-u',b).value);
+    if(!id){showRes('th-r','Could not find a video ID. Paste a full YouTube URL or an 11-character ID.');return;}
+    var qs=[['maxresdefault','HD 1280×720'],['sddefault','SD 640×480'],['hqdefault','HQ 480×360'],['mqdefault','MQ 320×180'],['default','Default 120×90']];
+    var h='<b>Video ID:</b> '+esc(id);
+    qs.forEach(function(q){
+      var u=ytThumb(id,q[0]);
+      h+='<div style="margin-top:14px;"><b>'+q[1]+'</b><br><img class="yt-thumb" src="'+u+'" alt="'+q[0]+'" loading="lazy" onerror="this.style.display=\'none\'"><br><a class="yt-ghost" style="text-decoration:none;display:inline-block;" href="'+u+'" target="_blank" rel="noopener">Open '+q[0]+'.jpg</a></div>';
+    });
+    h+=note('If an HD size shows nothing, that resolution was never generated for this video — try a smaller size. Thumbnails are public images; right-click / long-press to save.');
+    showRes('th-r',h);
+  };
+}},
+{id:'yt-seo',cat:'youtube',icon:'📊',name:'Video SEO Check',tag:'Score your video metadata out of 100',build:function(b){
+  b.innerHTML=lab('Video title')+inp('vs-t','Paste your video title')+lab('Description')+ta('vs-d','Paste your description',3)+lab('Number of tags')+'<input class="yt-in" id="vs-n" type="number" min="0" max="500" value="10">'+
+   [['vs-c1','Custom thumbnail uploaded'],['vs-c2','End screen / cards added'],['vs-c3','Captions / subtitles added'],['vs-c4','Added to a playlist'],['vs-c5','Pinned comment posted'],['vs-c6','Chapters / timestamps in description'],['vs-c7','Hashtags used (title or description)']].map(function(c){return '<label class="yt-chk"><input type="checkbox" id="'+c[0]+'"> '+c[1]+'</label>';}).join('')+
+   btn('Check Score','','vs-go')+resBox('vs-r');
+  $('#vs-go',b).onclick=function(){
+    var t=$('#vs-t',b).value.trim(),d=$('#vs-d',b).value.trim(),n=+$('#vs-n',b).value||0;
+    var items=[],score=0;
+    function chk(name,ok,pts,tip){items.push({name:name,ok:!!ok,pts:ok?pts:0,tip:tip});if(ok)score+=pts;}
+    chk('Title length ('+t.length+' chars)',t.length>=30&&t.length<=70,15,'Keep titles 30–70 characters.');
+    chk('Keyword near title start',t.length>3,5,'Put the main keyword near the start of the title.');
+    chk('Description length ('+d.length+' chars)',d.length>=200,15,'Write 200+ characters describing the video.');
+    chk('Tags ('+n+')',n>=5&&n<=30,10,'Use 5–30 relevant tags.');
+    chk('Custom thumbnail',$('#vs-c1',b).checked,10,'Custom thumbnails get far more clicks.');
+    chk('End screen / cards',$('#vs-c2',b).checked,10,'Keep viewers watching with end screens.');
+    chk('Captions / subtitles',$('#vs-c3',b).checked,10,'Captions boost watch time and search.');
+    chk('Playlist',$('#vs-c4',b).checked,5,'Playlists increase session time.');
+    chk('Pinned comment',$('#vs-c5',b).checked,5,'Pin a comment to drive engagement.');
+    chk('Chapters',$('#vs-c6',b).checked,10,'Chapters improve UX and search snippets.');
+    chk('Hashtags',$('#vs-c7',b).checked,5,'1–3 hashtags help discovery.');
+    var grade=score>=85?'Excellent 🏆':score>=70?'Good 👍':score>=50?'Average 🙂':'Needs work 🔧';
+    var h='<div class="yt-score">'+score+'/100</div><b>'+grade+'</b><div class="yt-bar"><div style="width:'+score+'%"></div></div><table class="yt-tbl">';
+    items.forEach(function(i){h+='<tr><td>'+esc(i.name)+'</td><td class="'+(i.ok?'yt-ok':'yt-bad')+'">'+(i.ok?'✓ +'+i.pts:'✗')+'</td></tr>';if(!i.ok)h+='<tr><td colspan="2" class="yt-note" style="border:0;padding-top:0;">💡 '+esc(i.tip)+'</td></tr>';});
+    showRes('vs-r',h+'</table>');
+  };
+}},
+{id:'yt-audit',cat:'youtube',icon:'🔍',name:'Channel Audit',tag:'Grade your channel health from your stats',build:function(b){
+  b.innerHTML='<div class="yt-row"><div>'+lab('Subscribers')+'<input class="yt-in" id="ca-s" type="number" value="1000"></div><div>'+lab('Avg views / video')+'<input class="yt-in" id="ca-v" type="number" value="500"></div></div>'+
+   '<div class="yt-row"><div>'+lab('Uploads per month')+'<input class="yt-in" id="ca-u" type="number" value="4"></div><div>'+lab('Channel age (months)')+'<input class="yt-in" id="ca-a" type="number" value="12"></div></div>'+
+   [['ca-b','Professional banner art'],['ca-tr','Channel trailer'],['ca-pl','Organized playlists'],['ca-ab','Completed About section'],['ca-th','Consistent thumbnail style']].map(function(c){return '<label class="yt-chk"><input type="checkbox" id="'+c[0]+'"> '+c[1]+'</label>';}).join('')+
+   btn('Audit Channel','','ca-go')+resBox('ca-r');
+  $('#ca-go',b).onclick=function(){
+    var s=+$('#ca-s',b).value||0,v=+$('#ca-v',b).value||0,u=+$('#ca-u',b).value||0;
+    var ratio=s>0?v/s:0,score=0,rows=[];
+    function add(n,ok,pts,tip){rows.push({n:n,ok:!!ok,pts:pts,tip:tip});if(ok)score+=pts;}
+    add('Views per subscriber ('+(ratio*100).toFixed(1)+'%)',ratio>=0.1,25,'Aim for avg views of at least 10% of subs — share videos everywhere.');
+    add('Upload consistency ('+u+'/mo)',u>=4,20,'4+ uploads per month keeps the algorithm warm.');
+    add('Branding (banner/trailer/about)',[$('#ca-b',b),$('#ca-tr',b),$('#ca-ab',b)].filter(function(x){return x.checked;}).length>=2,20,'Complete your banner, trailer and About section.');
+    add('Playlists organized',$('#ca-pl',b).checked,15,'Playlists raise session watch time.');
+    add('Thumbnail style',$('#ca-th',b).checked,20,'A consistent style builds click recognition.');
+    var g=score>=85?'Excellent 🏆':score>=65?'Good 👍':score>=40?'Fair 🙂':'Needs work 🔧';
+    var h='<div class="yt-score">'+score+'/100</div><b>'+g+'</b><div class="yt-bar"><div style="width:'+score+'%"></div></div><table class="yt-tbl">';
+    rows.forEach(function(r){h+='<tr><td>'+esc(r.n)+'</td><td class="'+(r.ok?'yt-ok':'yt-bad')+'">'+(r.ok?'✓ +'+r.pts:'✗')+'</td></tr>';if(!r.ok)h+='<tr><td colspan="2" class="yt-note" style="border:0;padding-top:0;">💡 '+esc(r.tip)+'</td></tr>';});
+    showRes('ca-r',h+'</table>');
+  };
+}},
+{id:'yt-multi',cat:'youtube',icon:'📺',name:'Multi Video Viewer',tag:'Watch up to 4 YouTube videos side by side',build:function(b){
+  var h=lab('Video URLs or IDs (up to 4 — live stream URLs work too)');
+  for(var i=1;i<=4;i++){h+='<div style="margin-bottom:8px;"><input class="yt-in" id="mv-'+i+'" placeholder="Video '+i+' URL or ID"></div>';}
+  h+=btn('Load Videos','','mv-go')+resBox('mv-r');
+  b.innerHTML=h;
+  $('#mv-go',b).onclick=function(){
+    var ids=[];
+    for(var j=1;j<=4;j++){var id=ytId($('#mv-'+j,b).value);if(id)ids.push(id);}
+    if(!ids.length){showRes('mv-r','Enter at least one valid YouTube URL or ID.');return;}
+    var g='<div style="display:grid;grid-template-columns:repeat('+(ids.length>1?2:1)+',1fr);gap:10px;">';
+    ids.forEach(function(id){g+='<div class="yt-vid"><iframe src="https://www.youtube-nocookie.com/embed/'+id+'" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy" title="YouTube video"></iframe></div>';});
+    showRes('mv-r',g+'</div>'+note('Paste watch, live, shorts or youtu.be links — all work.'));
+  };
+}},
+{id:'yt-shorts',cat:'youtube',icon:'📱',name:'Shorts Preview',tag:'Preview any Short in a phone frame',build:function(b){
+  b.innerHTML=lab('YouTube Shorts URL')+inp('sp-u','e.g. https://youtube.com/shorts/…')+btn('Preview','','sp-go')+resBox('sp-r');
+  $('#sp-go',b).onclick=function(){
+    var id=ytId($('#sp-u',b).value);
+    if(!id){showRes('sp-r','Could not find a video ID in that URL.');return;}
+    showRes('sp-r','<div class="yt-phone"><iframe src="https://www.youtube.com/embed/'+id+'" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="Shorts preview"></iframe></div>');
+  };
+}},
+{id:'yt-live',cat:'youtube',icon:'🔴',name:'Live Stream Preview',tag:'Embed & test a YouTube live stream',build:function(b){
+  b.innerHTML=lab('Live stream URL or video ID')+inp('lv-u','e.g. https://youtube.com/live/…')+btn('Load Stream','','lv-go')+resBox('lv-r');
+  $('#lv-go',b).onclick=function(){
+    var id=ytId($('#lv-u',b).value);
+    if(!id){showRes('lv-r','Could not find a video ID.');return;}
+    showRes('lv-r','<div class="yt-vid"><iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="Live stream"></iframe></div>'+note('⚠️ If the player shows an error, the stream owner has disabled embedding — nothing wrong with this tool.'));
+  };
+}},
+{id:'yt-twitch',cat:'youtube',icon:'🎮',name:'Twitch Viewer',tag:'Watch any Twitch channel live',build:function(b){
+  b.innerHTML=lab('Twitch channel name')+inp('tw-c','e.g. shroud')+btn('Watch','','tw-go')+resBox('tw-r');
+  $('#tw-go',b).onclick=function(){
+    var c=$('#tw-c',b).value.trim().replace(/^@/,'');
+    if(!/^[A-Za-z0-9_]{3,25}$/.test(c)){showRes('tw-r','Enter a valid Twitch channel name.');return;}
+    showRes('tw-r','<div class="yt-vid"><iframe src="https://player.twitch.tv/?channel='+encodeURIComponent(c)+'&parent=novelreader-hindi-english.blogspot.com&muted=true" allowfullscreen title="Twitch player"></iframe></div>'+note('The stream appears only while the channel is live.'));
+  };
+}},
+/* ---------- MEDIA ---------- */
+{id:'m-qr',cat:'media',icon:'🔳',name:'QR Code Maker',tag:'Custom QR codes with colors & size',build:function(b){
+  b.innerHTML=lab('Text or URL')+ta('qr-t','https://…',2)+
+   '<div class="yt-row"><div>'+lab('Size (px)')+'<select class="yt-in" id="qr-s"><option>200</option><option selected>300</option><option>400</option><option>600</option></select></div>'+
+   '<div>'+lab('Dark color')+'<input class="yt-in" type="color" id="qr-d" value="#000000"></div>'+
+   '<div>'+lab('Light color')+'<input class="yt-in" type="color" id="qr-l" value="#ffffff"></div></div>'+
+   btn('Generate QR','','qr-go')+'<div id="qr-out" style="margin-top:16px;text-align:center;"></div>';
+  $('#qr-go',b).onclick=function(){
+    var t=$('#qr-t',b).value.trim();
+    var out=$('#qr-out',b);out.innerHTML='';
+    if(!t){out.innerHTML='<span class="yt-note">Enter some text first.</span>';return;}
+    if(typeof QRCode==='undefined'){out.innerHTML='<span class="yt-note">QR library failed to load — check your connection and retry.</span>';return;}
+    new QRCode(out,{text:t,width:+$('#qr-s',b).value,height:+$('#qr-s',b).value,colorDark:$('#qr-d',b).value,colorLight:$('#qr-l',b).value,correctLevel:QRCode.CorrectLevel.M});
+    var bd=document.createElement('button');bd.className='yt-btn';bd.textContent='Download PNG';bd.style.marginTop='12px';
+    bd.onclick=function(){
+      var cv=out.querySelector('canvas'),url=cv?cv.toDataURL('image/png'):null;
+      if(!url){var im=out.querySelector('img');url=im?im.src:null;}
+      if(!url)return;
+      var a=document.createElement('a');a.href=url;a.download='qrcode.png';document.body.appendChild(a);a.click();a.remove();
+    };
+    out.appendChild(document.createElement('div')).appendChild(bd);
+  };
+}},
+{id:'m-resize',cat:'media',icon:'↔️',name:'Image Resizer',tag:'Resize images to exact dimensions',build:function(b){
+  b.innerHTML=lab('Choose image')+'<input class="yt-in" type="file" id="rz-f" accept="image/*">'+
+   '<div class="yt-row"><div>'+lab('Width (px)')+'<input class="yt-in" id="rz-w" type="number" value="800" min="1"></div><div>'+lab('Height (px)')+'<input class="yt-in" id="rz-h" type="number" value="600" min="1"></div></div>'+
+   '<label class="yt-chk"><input type="checkbox" id="rz-lock" checked> Lock aspect ratio</label>'+
+   lab('Format')+'<select class="yt-in" id="rz-fmt"><option value="image/png">PNG</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option></select>'+
+   btn('Resize & Download','','rz-go')+resBox('rz-r');
+  var nat=null;
+  $('#rz-f',b).onchange=function(){var f=this.files[0];if(!f)return;loadImg(f).then(function(im){nat={w:im.naturalWidth,h:im.naturalHeight};$('#rz-w',b).value=nat.w;$('#rz-h',b).value=nat.h;showRes('rz-r','Loaded: <b>'+esc(f.name)+'</b> — '+nat.w+'×'+nat.h);}).catch(function(){showRes('rz-r','Could not read that image.');});};
+  $('#rz-w',b).oninput=function(){if($('#rz-lock',b).checked&&nat)$('#rz-h',b).value=Math.max(1,Math.round(this.value*nat.h/nat.w));};
+  $('#rz-h',b).oninput=function(){if($('#rz-lock',b).checked&&nat)$('#rz-w',b).value=Math.max(1,Math.round(this.value*nat.w/nat.h));};
+  $('#rz-go',b).onclick=function(){
+    var f=$('#rz-f',b).files[0];if(!f){showRes('rz-r','Choose an image first.');return;}
+    var W=Math.max(1,+$('#rz-w',b).value||1),H=Math.max(1,+$('#rz-h',b).value||1),fmt=$('#rz-fmt',b).value;
+    loadImg(f).then(function(im){
+      var c=document.createElement('canvas');c.width=W;c.height=H;
+      var x=c.getContext('2d');
+      if(fmt==='image/jpeg'){x.fillStyle='#fff';x.fillRect(0,0,W,H);}
+      x.drawImage(im,0,0,W,H);
+      c.toBlob(function(bl){if(!bl){showRes('rz-r','This browser cannot encode that format.');return;}dl(bl,'resized-'+W+'x'+H+'.'+fmt.split('/')[1]);},fmt,0.92);
+    }).catch(function(){showRes('rz-r','Could not read that image.');});
+  };
+}},
+{id:'m-comp',cat:'media',icon:'🗜️',name:'Image Compressor',tag:'Shrink image file size with quality control',build:function(b){
+  b.innerHTML=lab('Choose image')+'<input class="yt-in" type="file" id="cp-f" accept="image/*">'+
+   lab('Quality: <span id="cp-qv">75</span>%')+'<input type="range" id="cp-q" min="10" max="95" value="75">'+
+   btn('Compress & Download','','cp-go')+resBox('cp-r');
+  $('#cp-q',b).oninput=function(){$('#cp-qv',b).textContent=this.value;};
+  $('#cp-go',b).onclick=function(){
+    var f=$('#cp-f',b).files[0];if(!f){showRes('cp-r','Choose an image first.');return;}
+    var q=+$('#cp-q',b).value/100;
+    loadImg(f).then(function(im){
+      var c=document.createElement('canvas');c.width=im.naturalWidth;c.height=im.naturalHeight;
+      c.getContext('2d').drawImage(im,0,0);
+      c.toBlob(function(bl){
+        if(!bl){showRes('cp-r','Encoding failed in this browser.');return;}
+        var pct=Math.round((1-bl.size/f.size)*100);
+        showRes('cp-r','Original: <b>'+fmtB(f.size)+'</b> → Compressed: <b>'+fmtB(bl.size)+'</b> <span class="'+(pct>0?'yt-ok':'yt-bad')+'">('+(pct>0?'−':'')+Math.abs(pct)+'%)</span><br><br><button class="yt-ghost" id="cp-dl">Download Compressed JPG</button>');
+        $('#cp-dl',b).onclick=function(){dl(bl,'compressed.jpg');};
+      },'image/jpeg',q);
+    }).catch(function(){showRes('cp-r','Could not read that image.');});
+  };
+}},
+{id:'m-conv',cat:'media',icon:'🔄',name:'Image Converter',tag:'Convert between PNG, JPG & WebP',build:function(b){
+  b.innerHTML=lab('Choose image')+'<input class="yt-in" type="file" id="cv-f" accept="image/*">'+
+   lab('Convert to')+'<select class="yt-in" id="cv-t"><option value="image/png">PNG</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option></select>'+
+   btn('Convert & Download','','cv-go')+resBox('cv-r');
+  $('#cv-go',b).onclick=function(){
+    var f=$('#cv-f',b).files[0];if(!f){showRes('cv-r','Choose an image first.');return;}
+    var type=$('#cv-t',b).value,ext=type.split('/')[1];
+    loadImg(f).then(function(im){
+      var c=document.createElement('canvas');c.width=im.naturalWidth;c.height=im.naturalHeight;
+      var x=c.getContext('2d');
+      if(type==='image/jpeg'){x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);}
+      x.drawImage(im,0,0);
+      c.toBlob(function(bl){if(!bl){showRes('cv-r','This browser cannot encode '+ext.toUpperCase()+'.');return;}dl(bl,'converted.'+ext);showRes('cv-r','Converted to <b>'+ext.toUpperCase()+'</b> — '+fmtB(bl.size));},type,0.92);
+    }).catch(function(){showRes('cv-r','Could not read that image.');});
+  };
+}},
+{id:'m-v2i',cat:'media',icon:'🎬',name:'Video to Image',tag:'Capture any frame as a PNG image',build:function(b){
+  b.innerHTML=lab('Choose video')+'<input class="yt-in" type="file" id="vi-f" accept="video/*">'+
+   '<video id="vi-v" controls style="width:100%;border-radius:10px;margin-top:12px;background:#000;" muted playsinline></video>'+
+   '<div class="yt-row"><div>'+lab('Time (seconds)')+'<input class="yt-in" id="vi-t" type="number" step="0.1" value="1" min="0"></div><div>'+lab(' ')+'<button class="yt-btn" id="vi-go" style="margin-top:0;width:100%;">Capture Frame</button></div></div>'+
+   resBox('vi-r');
+  var v=$('#vi-v',b),url=null;
+  $('#vi-f',b).onchange=function(){var f=this.files[0];if(!f)return;if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(f);v.src=url;};
+  $('#vi-go',b).onclick=function(){
+    if(!v.src||!v.duration){showRes('vi-r','Load a video first.');return;}
+    var t=Math.max(0,Math.min(+$('#vi-t',b).value||0,v.duration-0.05));
+    function grab(){
+      var c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+      c.getContext('2d').drawImage(v,0,0);
+      c.toBlob(function(bl){dl(bl,'frame-'+t.toFixed(1)+'s.png');showRes('vi-r','Frame captured at '+t.toFixed(1)+'s — '+c.width+'×'+c.height+' PNG downloaded.');});
+    }
+    if(Math.abs(v.currentTime-t)>0.05){v.onseeked=function(){v.onseeked=null;grab();};v.currentTime=t;}
+    else grab();
+  };
+}},
+{id:'m-inspect',cat:'media',icon:'🔎',name:'MP4 Inspector',tag:'Duration, resolution, size & frame grab',build:function(b){
+  b.innerHTML=lab('Choose video')+'<input class="yt-in" type="file" id="mi-f" accept="video/*">'+resBox('mi-r');
+  $('#mi-f',b).onchange=function(){
+    var f=this.files[0];if(!f)return;
+    var v=document.createElement('video');v.preload='metadata';v.muted=true;v.playsInline=true;
+    v.onloadedmetadata=function(){
+      var d=v.duration;
+      showRes('mi-r','<table class="yt-tbl"><tr><th>Property</th><th>Value</th></tr>'+
+       '<tr><td>File name</td><td>'+esc(f.name)+'</td></tr>'+
+       '<tr><td>File size</td><td>'+fmtB(f.size)+'</td></tr>'+
+       '<tr><td>Type</td><td>'+esc(f.type||'unknown')+'</td></tr>'+
+       '<tr><td>Duration</td><td>'+Math.floor(d/60)+':'+String(Math.floor(d%60)).padStart(2,'0')+' ('+d.toFixed(2)+'s)</td></tr>'+
+       '<tr><td>Resolution</td><td>'+v.videoWidth+'×'+v.videoHeight+'</td></tr></table><br><button class="yt-ghost" id="mi-fr">Capture Frame as PNG</button>');
+      $('#mi-fr',b).onclick=function(){
+        v.onseeked=function(){v.onseeked=null;var c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);c.toBlob(function(bl){dl(bl,'frame.png');});};
+        v.currentTime=Math.min(1,d/2);
+      };
+    };
+    v.onerror=function(){showRes('mi-r','Could not read this video file.');};
+    v.src=URL.createObjectURL(f);
+  };
+}},
+{id:'m-cut',cat:'media',icon:'✂️',name:'MP3 Cutter',tag:'Trim audio precisely, export MP3',build:function(b){
+  b.innerHTML=lab('Choose audio file')+'<input class="yt-in" type="file" id="mc-f" accept="audio/*">'+
+   '<div class="yt-row"><div>'+lab('Start (sec)')+'<input class="yt-in" id="mc-s" type="number" step="0.1" min="0" value="0"></div><div>'+lab('End (sec)')+'<input class="yt-in" id="mc-e" type="number" step="0.1" min="0" value="30"></div></div>'+
+   '<div class="yt-note" id="mc-d"></div>'+btn('Cut & Download MP3','','mc-go')+resBox('mc-r');
+  var actx=null;
+  function ctx(){if(!actx)actx=new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume();return actx;}
+  function f2i(f){var o=new Int16Array(f.length);for(var i=0;i<f.length;i++){var s=Math.max(-1,Math.min(1,f[i]));o[i]=s<0?s*0x8000:s*0x7FFF;}return o;}
+  $('#mc-f',b).onchange=function(){var f=this.files[0];if(!f)return;var a=new Audio();a.preload='metadata';a.onloadedmetadata=function(){$('#mc-d',b).textContent='Duration: '+a.duration.toFixed(1)+'s';$('#mc-e',b).value=Math.min(30,a.duration).toFixed(1);URL.revokeObjectURL(a.src);};a.onerror=function(){$('#mc-d',b).textContent='';};a.src=URL.createObjectURL(f);};
+  $('#mc-go',b).onclick=function(){
+    var f=$('#mc-f',b).files[0];if(!f){showRes('mc-r','Choose an audio file first.');return;}
+    if(typeof lamejs==='undefined'){showRes('mc-r','MP3 encoder library failed to load — check your connection and retry.');return;}
+    var s0=+$('#mc-s',b).value||0,s1=+$('#mc-e',b).value||0;
+    if(s1<=s0){showRes('mc-r','End time must be greater than start time.');return;}
+    showRes('mc-r','⏳ Decoding & encoding…');
+    f.arrayBuffer().then(function(ab){return ctx().decodeAudioData(ab);}).then(function(buf){
+      var sr=buf.sampleRate,ch=Math.min(2,buf.numberOfChannels);
+      var a=Math.floor(s0*sr),e=Math.min(Math.floor(s1*sr),buf.length);
+      if(e<=a){showRes('mc-r','That range is outside the audio.');return;}
+      var L=f2i(buf.getChannelData(0).subarray(a,e));
+      var R=ch>1?f2i(buf.getChannelData(1).subarray(a,e)):null;
+      var enc=new lamejs.Mp3Encoder(ch,sr,128),out=[];
+      for(var i=0;i<L.length;i+=1152){var d=enc.encodeBuffer(L.subarray(i,i+1152),R?R.subarray(i,i+1152):null);if(d.length)out.push(new Int8Array(d));}
+      var fin=enc.flush();if(fin.length)out.push(new Int8Array(fin));
+      dl(new Blob(out,{type:'audio/mpeg'}),'cut-'+s0+'s-'+s1+'s.mp3');
+      showRes('mc-r','<span class="yt-ok">Done!</span> Trimmed '+((e-a)/sr).toFixed(1)+'s → MP3 downloaded (128 kbps).');
+    }).catch(function(err){showRes('mc-r','Could not decode this file: '+esc((err&&err.message)||err));});
+  };
+}},
+{id:'m-v2mp3',cat:'media',icon:'🎵',name:'Video to MP3',tag:'Extract audio from your video files',build:function(b){
+  b.innerHTML=lab('Choose video file (its audio will be extracted)')+'<input class="yt-in" type="file" id="vm-f" accept="video/*">'+note('Works on files from your device only — never from URLs.')+btn('Extract MP3','','vm-go')+resBox('vm-r');
+  var actx=null;
+  function ctx(){if(!actx)actx=new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume();return actx;}
+  function f2i(f){var o=new Int16Array(f.length);for(var i=0;i<f.length;i++){var s=Math.max(-1,Math.min(1,f[i]));o[i]=s<0?s*0x8000:s*0x7FFF;}return o;}
+  $('#vm-go',b).onclick=function(){
+    var f=$('#vm-f',b).files[0];if(!f){showRes('vm-r','Choose a video file first.');return;}
+    if(typeof lamejs==='undefined'){showRes('vm-r','MP3 encoder library failed to load — check your connection and retry.');return;}
+    showRes('vm-r','⏳ Extracting audio… (large files take longer)');
+    f.arrayBuffer().then(function(ab){return ctx().decodeAudioData(ab);}).then(function(buf){
+      var sr=buf.sampleRate,ch=Math.min(2,buf.numberOfChannels);
+      var L=f2i(buf.getChannelData(0)),R=ch>1?f2i(buf.getChannelData(1)):null;
+      var enc=new lamejs.Mp3Encoder(ch,sr,128),out=[],i=0;
+      (function step(){
+        var n=Math.min(i+1152*24,L.length);
+        for(;i<n;i+=1152){var d=enc.encodeBuffer(L.subarray(i,i+1152),R?R.subarray(i,i+1152):null);if(d.length)out.push(new Int8Array(d));}
+        if(i<L.length){showRes('vm-r','⏳ Encoding… '+Math.round(i/L.length*100)+'%');setTimeout(step,0);}
+        else{var e2=enc.flush();if(e2.length)out.push(new Int8Array(e2));dl(new Blob(out,{type:'audio/mpeg'}),'audio.mp3');showRes('vm-r','<span class="yt-ok">Done!</span> MP3 downloaded (128 kbps).');}
+      })();
+    }).catch(function(err){showRes('vm-r','Could not extract audio: '+esc((err&&err.message)||err)+'. Try an MP4 file.');});
+  };
+}},
+{id:'m-vcomp',cat:'media',icon:'📦',name:'Video Compressor',tag:'Re-encode video at lower bitrate (WebM)',build:function(b){
+  b.innerHTML=lab('Choose video')+'<input class="yt-in" type="file" id="vc-f" accept="video/*">'+
+   lab('Target quality')+'<select class="yt-in" id="vc-q"><option value="400000">Low (~0.4 Mbps)</option><option value="1000000" selected>Medium (~1 Mbps)</option><option value="2500000">High (~2.5 Mbps)</option></select>'+
+   note('Output is WebM format (plays in all modern browsers). Your original file is never modified.')+
+   btn('Compress','','vc-go')+resBox('vc-r');
+  $('#vc-go',b).onclick=function(){
+    var f=$('#vc-f',b).files[0];if(!f){showRes('vc-r','Choose a video first.');return;}
+    if(typeof MediaRecorder==='undefined'){showRes('vc-r','MediaRecorder is not supported in this browser.');return;}
+    var mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].filter(function(m){try{return MediaRecorder.isTypeSupported(m);}catch(e){return false;};})[0];
+    if(!mime){showRes('vc-r','No supported recording format in this browser.');return;}
+    showRes('vc-r','⏳ Compressing… the video will play through once.');
+    var v=document.createElement('video');v.muted=true;v.playsInline=true;v.src=URL.createObjectURL(f);
+    v.onerror=function(){showRes('vc-r','Could not load this video.');URL.revokeObjectURL(v.src);};
+    v.onloadedmetadata=function(){
+      var stream=v.captureStream?v.captureStream():null;
+      if(!stream){showRes('vc-r','captureStream is not supported in this browser.');URL.revokeObjectURL(v.src);return;}
+      var rec,started=false;
+      try{rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:+$('#vc-q',b).value});}
+      catch(e){showRes('vc-r','Recorder failed: '+esc(e.message));return;}
+      var chunks=[];
+      rec.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data);};
+      rec.onstop=function(){
+        var bl=new Blob(chunks,{type:'video/webm'});
+        var pct=Math.round((1-bl.size/f.size)*100);
+        showRes('vc-r','Original: <b>'+fmtB(f.size)+'</b> → Compressed: <b>'+fmtB(bl.size)+'</b> <span class="'+(pct>=0?'yt-ok':'yt-bad')+'">('+(pct>=0?'−':'+')+Math.abs(pct)+'%)</span><br><br><button class="yt-ghost" id="vc-dl">Download WebM</button>');
+        $('#vc-dl',b).onclick=function(){dl(bl,'compressed.webm');};
+        URL.revokeObjectURL(v.src);
+      };
+      v.onended=function(){if(started&&rec.state!=='inactive')rec.stop();};
+      v.play().then(function(){rec.start(500);started=true;
+        setTimeout(function(){if(rec.state!=='inactive')rec.stop();},(v.duration+4)*1000);
+      }).catch(function(e){showRes('vc-r','Playback failed: '+esc(e.message));URL.revokeObjectURL(v.src);});
+    };
+  };
+}},
+{id:'m-color',cat:'media',icon:'🎨',name:'Color Converter',tag:'HEX, RGB & HSL with one click',build:function(b){
+  b.innerHTML='<div class="yt-row"><div>'+lab('Pick color')+'<input class="yt-in" type="color" id="cc-p" value="#e62117"></div><div>'+lab('HEX code')+'<input class="yt-in" id="cc-h" value="#e62117" maxlength="7"></div></div>'+
+   '<div class="yt-row"><div>'+lab('R')+'<input class="yt-in" id="cc-r" type="number" min="0" max="255"></div><div>'+lab('G')+'<input class="yt-in" id="cc-g" type="number" min="0" max="255"></div><div>'+lab('B')+'<input class="yt-in" id="cc-b" type="number" min="0" max="255"></div></div>'+
+   '<div id="cc-sw" style="height:70px;border-radius:10px;margin-top:14px;border:1px solid #eee;"></div>'+resBox('cc-r2');
+  function hx2rgb(h){h=h.replace('#','');if(h.length===3)h=h.split('').map(function(c){return c+c;}).join('');var n=parseInt(h,16);return [(n>>16)&255,(n>>8)&255,n&255];}
+  function rgb2hsl(r,g,b){r/=255;g/=255;b/=255;var mx=Math.max(r,g,b),mn=Math.min(r,g,b),h=0,s=0,l=(mx+mn)/2;if(mx!==mn){var d=mx-mn;s=l>0.5?d/(2-mx-mn):d/(mx+mn);if(mx===r)h=(g-b)/d+(g<b?6:0);else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h*=60;}return [Math.round(h),Math.round(s*100),Math.round(l*100)];}
+  function upd(fromHex){
+    var hex,rgb;
+    if(fromHex){hex=$('#cc-h',b).value.trim();if(!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(hex))return;if(hex.charAt(0)!=='#')hex='#'+hex;rgb=hx2rgb(hex);}
+    else{rgb=[0,1,2].map(function(i){return Math.max(0,Math.min(255,+$('#cc-'+'rgb'[i],b).value||0));});hex='#'+rgb.map(function(v){return v.toString(16).padStart(2,'0');}).join('');}
+    $('#cc-p',b).value=hex;$('#cc-h',b).value=hex;
+    $('#cc-r',b).value=rgb[0];$('#cc-g',b).value=rgb[1];$('#cc-b',b).value=rgb[2];
+    var hsl=rgb2hsl(rgb[0],rgb[1],rgb[2]);
+    $('#cc-sw',b).style.background=hex;
+    showRes('cc-r2','<table class="yt-tbl"><tr><td><b>HEX</b></td><td><code>'+hex+'</code> <button class="yt-ghost" data-c="'+hex+'">Copy</button></td></tr>'+
+     '<tr><td><b>RGB</b></td><td><code>rgb('+rgb.join(', ')+')</code> <button class="yt-ghost" data-c="rgb('+rgb.join(', ')+')">Copy</button></td></tr>'+
+     '<tr><td><b>HSL</b></td><td><code>hsl('+hsl[0]+', '+hsl[1]+'%, '+hsl[2]+'%)</code> <button class="yt-ghost" data-c="hsl('+hsl[0]+', '+hsl[1]+'%, '+hsl[2]+'%)">Copy</button></td></tr></table>');
+    $$('#cc-r2 [data-c]',b).forEach(function(x){x.onclick=function(){copyTxt(x.getAttribute('data-c'),x);};});
+  }
+  $('#cc-p',b).oninput=function(){$('#cc-h',b).value=this.value;upd(true);};
+  $('#cc-h',b).oninput=function(){upd(true);};
+  ['r','g','b'].forEach(function(k){$('#cc-'+k,b).oninput=function(){upd(false);};});
+  upd(true);
+}},
+/* ---------- DOCUMENTS ---------- */
+{id:'d-pdf',cat:'docs',icon:'📄',name:'Photo to PDF',tag:'Multiple photos into one PDF file',build:function(b){
+  b.innerHTML=lab('Choose photos (multiple)')+'<input class="yt-in" type="file" id="pp-f" accept="image/*" multiple>'+
+   '<div class="yt-row"><div>'+lab('Page size')+'<select class="yt-in" id="pp-s"><option value="a4">A4</option><option value="letter">Letter</option></select></div>'+
+   '<div>'+lab('Orientation')+'<select class="yt-in" id="pp-o"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></div></div>'+
+   btn('Create PDF','','pp-go')+resBox('pp-r');
+  $('#pp-go',b).onclick=function(){
+    var fs=$('#pp-f',b).files;if(!fs.length){showRes('pp-r','Choose at least one photo.');return;}
+    if(typeof window.jspdf==='undefined'){showRes('pp-r','PDF library failed to load — check your connection and retry.');return;}
+    showRes('pp-r','⏳ Building PDF…');
+    var pdf=new window.jspdf.jsPDF({unit:'mm',format:$('#pp-s',b).value,orientation:$('#pp-o',b).value});
+    var files=Array.prototype.slice.call(fs),i=0;
+    (function next(){
+      if(i>=files.length){pdf.save('photos.pdf');showRes('pp-r','<span class="yt-ok">Done!</span> '+files.length+' photo(s) → PDF downloaded.');return;}
+      var f=files[i],rd=new FileReader();
+      rd.onload=function(){
+        loadImg(f).then(function(im){
+          var pw=pdf.internal.pageSize.getWidth(),ph=pdf.internal.pageSize.getHeight();
+          var r=Math.min(pw/im.naturalWidth,ph/im.naturalHeight),w=im.naturalWidth*r,h=im.naturalHeight*r;
+          if(i>0)pdf.addPage();
+          pdf.addImage(rd.result,f.type.indexOf('png')>=0?'PNG':'JPEG',(pw-w)/2,(ph-h)/2,w,h);
+          i++;next();
+        }).catch(function(){i++;next();});
+      };
+      rd.onerror=function(){i++;next();};
+      rd.readAsDataURL(f);
+    })();
+  };
+}},
+{id:'d-merge',cat:'docs',icon:'📚',name:'PDF Merge',tag:'Combine several PDFs into one',build:function(b){
+  b.innerHTML=lab('Choose PDF files (in merge order)')+'<input class="yt-in" type="file" id="mg-f" accept="application/pdf" multiple>'+btn('Merge PDFs','','mg-go')+resBox('mg-r');
+  $('#mg-go',b).onclick=function(){
+    var fs=$('#mg-f',b).files;if(fs.length<2){showRes('mg-r','Choose at least 2 PDF files.');return;}
+    if(typeof PDFLib==='undefined'){showRes('mg-r','PDF library failed to load — check your connection and retry.');return;}
+    showRes('mg-r','⏳ Merging…');
+    (async function(){
+      try{
+        var out=await PDFLib.PDFDocument.create();
+        for(var i=0;i<fs.length;i++){
+          var src=await PDFLib.PDFDocument.load(await fs[i].arrayBuffer(),{ignoreEncryption:true});
+          var pages=await out.copyPages(src,src.getPageIndices());
+          pages.forEach(function(p){out.addPage(p);});
+        }
+        var bytes=await out.save();
+        dl(new Blob([bytes],{type:'application/pdf'}),'merged.pdf');
+        showRes('mg-r','<span class="yt-ok">Done!</span> '+fs.length+' PDFs → '+out.getPageCount()+' pages downloaded.');
+      }catch(e){showRes('mg-r','Merge failed: '+esc(e.message||e));}
+    })();
+  };
+}},
+{id:'d-crop',cat:'docs',icon:'✂️',name:'PDF Crop',tag:'Trim page margins on every page',build:function(b){
+  b.innerHTML=lab('Choose PDF')+'<input class="yt-in" type="file" id="pc-f" accept="application/pdf">'+
+   '<div class="yt-row"><div>'+lab('Top (mm)')+'<input class="yt-in" id="pc-t" type="number" value="10" min="0"></div><div>'+lab('Bottom (mm)')+'<input class="yt-in" id="pc-b" type="number" value="10" min="0"></div></div>'+
+   '<div class="yt-row"><div>'+lab('Left (mm)')+'<input class="yt-in" id="pc-l" type="number" value="10" min="0"></div><div>'+lab('Right (mm)')+'<input class="yt-in" id="pc-r" type="number" value="10" min="0"></div></div>'+
+   btn('Crop & Download','','pc-go')+resBox('pc-r');
+  $('#pc-go',b).onclick=function(){
+    var f=$('#pc-f',b).files[0];if(!f){showRes('pc-r','Choose a PDF first.');return;}
+    if(typeof PDFLib==='undefined'){showRes('pc-r','PDF library failed to load — check your connection and retry.');return;}
+    var k=2.8346457,t=+$('#pc-t',b).value*k,bo=+$('#pc-b',b).value*k,l=+$('#pc-l',b).value*k,r=+$('#pc-r',b).value*k;
+    showRes('pc-r','⏳ Cropping…');
+    (async function(){
+      try{
+        var doc=await PDFLib.PDFDocument.load(await f.arrayBuffer(),{ignoreEncryption:true});
+        doc.getPages().forEach(function(p){
+          var mbox=p.getMediaBox(),W=mbox.width,H=mbox.height;
+          p.setCropBox(l,bo,Math.max(10,W-l-r),Math.max(10,H-t-bo));
+        });
+        var bytes=await doc.save();
+        dl(new Blob([bytes],{type:'application/pdf'}),'cropped.pdf');
+        showRes('pc-r','<span class="yt-ok">Done!</span> Margins trimmed on all '+doc.getPageCount()+' page(s).');
+      }catch(e){showRes('pc-r','Crop failed: '+esc(e.message||e));}
+    })();
+  };
+}},
+{id:'d-comp',cat:'docs',icon:'🗜️',name:'PDF Compress',tag:'Strip metadata & rewrite smaller',build:function(b){
+  b.innerHTML=lab('Choose PDF')+'<input class="yt-in" type="file" id="dc-f" accept="application/pdf">'+note('Rewrites the PDF with object streams and removes metadata. Savings vary — image-heavy PDFs shrink less.')+btn('Compress','','dc-go')+resBox('dc-r');
+  $('#dc-go',b).onclick=function(){
+    var f=$('#dc-f',b).files[0];if(!f){showRes('dc-r','Choose a PDF first.');return;}
+    if(typeof PDFLib==='undefined'){showRes('dc-r','PDF library failed to load — check your connection and retry.');return;}
+    showRes('dc-r','⏳ Compressing…');
+    (async function(){
+      try{
+        var doc=await PDFLib.PDFDocument.load(await f.arrayBuffer(),{ignoreEncryption:true});
+        doc.setTitle('');doc.setAuthor('');doc.setSubject('');doc.setKeywords([]);doc.setProducer('');doc.setCreator('');
+        var bytes=await doc.save({useObjectStreams:true});
+        var bl=new Blob([bytes],{type:'application/pdf'});
+        var pct=Math.round((1-bl.size/f.size)*100);
+        showRes('dc-r','Original: <b>'+fmtB(f.size)+'</b> → Rewritten: <b>'+fmtB(bl.size)+'</b> <span class="'+(pct>=0?'yt-ok':'yt-bad')+'">('+(pct>=0?'−':'+')+Math.abs(pct)+'%)</span><br><br><button class="yt-ghost" id="dc-dl">Download PDF</button>');
+        $('#dc-dl',b).onclick=function(){dl(bl,'compressed.pdf');};
+      }catch(e){showRes('dc-r','Compress failed: '+esc(e.message||e));}
+    })();
+  };
+}},
+{id:'d-hand',cat:'docs',icon:'✍️',name:'Text to Handwriting',tag:'Handwritten-style PNG from your text',build:function(b){
+  b.innerHTML=lab('Your text')+ta('hw-t','Type or paste text here…',4)+
+   '<div class="yt-row"><div>'+lab('Ink color')+'<input class="yt-in" type="color" id="hw-c" value="#1a3a8f"></div><div>'+lab('Font size')+'<select class="yt-in" id="hw-s"><option value="28">Small</option><option value="38" selected>Medium</option><option value="52">Large</option></select></div></div>'+
+   btn('Generate Handwriting','','hw-go')+'<div style="margin-top:14px;text-align:center;"><canvas id="hw-cv" style="max-width:100%;border:1px solid #eee;border-radius:10px;background:#fff;"></canvas></div>'+resBox('hw-r');
+  $('#hw-go',b).onclick=function(){
+    var txt=$('#hw-t',b).value;if(!txt.trim()){showRes('hw-r','Type some text first.');return;}
+    var size=+$('#hw-s',b).value,color=$('#hw-c',b).value;
+    showRes('hw-r','⏳ Loading handwriting font…');
+    function draw(){
+      var cv=$('#hw-cv',b),ctx=cv.getContext('2d');
+      var W=760,lh=size*1.7,pad=40;
+      ctx.font=size+'px Caveat, cursive';
+      var words=txt.split(/\s+/),lines=[],line='';
+      words.forEach(function(w){
+        var t=line?line+' '+w:w;
+        if(ctx.measureText(t).width>W-pad*2&&line){lines.push(line);line=w;}else{line=t;}
+      });
+      if(line)lines.push(line);
+      cv.width=W;cv.height=Math.ceil(lines.length*lh+pad*1.2);
+      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,cv.width,cv.height);
+      ctx.strokeStyle='#e8ecf5';ctx.lineWidth=1;
+      for(var y=pad*0.7;y<cv.height;y+=lh){ctx.beginPath();ctx.moveTo(24,y+size*0.4);ctx.lineTo(W-24,y+size*0.4);ctx.stroke();}
+      ctx.font=size+'px Caveat, cursive';ctx.fillStyle=color;
+      lines.forEach(function(ln,i){ctx.fillText(ln,pad,pad+i*lh);});
+      showRes('hw-r','<button class="yt-ghost" id="hw-dl">Download PNG</button>');
+      $('#hw-dl',b).onclick=function(){cv.toBlob(function(bl){dl(bl,'handwriting.png');});};
+    }
+    if(document.fonts&&document.fonts.load){document.fonts.load(size+'px Caveat').then(draw,draw);}else{draw();}
+  };
+}},
+{id:'d-doc',cat:'docs',icon:'📃',name:'Text to Doc',tag:'Plain text to Word-compatible .doc',build:function(b){
+  b.innerHTML=lab('Your text')+ta('td-t','Type or paste text…',6)+lab('Document title')+inp('td-ti','My Document')+btn('Download .doc','','td-go')+resBox('td-r');
+  $('#td-go',b).onclick=function(){
+    var txt=$('#td-t',b).value;if(!txt.trim()){showRes('td-r','Type some text first.');return;}
+    var title=$('#td-ti',b).value.trim()||'Document';
+    var paras=txt.split(/\n/).map(function(p){return '<p>'+esc(p.trim()?p:' ')+'</p>';}).join('');
+    var html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>'+esc(title)+'</title></head><body><h1>'+esc(title)+'</h1>'+paras+'</body></html>';
+    dl(new Blob(['﻿',html],{type:'application/msword'}),title.replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-').toLowerCase()+'.doc');
+    showRes('td-r','<span class="yt-ok">Done!</span> Word-compatible .doc downloaded (opens in MS Word / Google Docs).');
+  };
+}},
+/* ---------- PRODUCTIVITY ---------- */
+{id:'p-wc',cat:'prod',icon:'🔢',name:'Word Counter',tag:'Words, characters, sentences & reading time',build:function(b){
+  b.innerHTML=lab('Paste your text')+ta('wc-t','Start typing or paste…',6)+resBox('wc-r');
+  function count(){
+    var t=$('#wc-t',b).value;
+    var words=(t.trim().match(/\S+/g)||[]).length;
+    var chars=t.length,noSp=t.replace(/\s/g,'').length;
+    var sent=(t.match(/[.!?]+/g)||[]).length;
+    var paras=t.split(/\n+/).filter(function(x){return x.trim();}).length;
+    var mins=words/200;
+    showRes('wc-r','<table class="yt-tbl"><tr><td>Words</td><td><b>'+words+'</b></td></tr><tr><td>Characters</td><td><b>'+chars+'</b></td></tr><tr><td>Characters (no spaces)</td><td><b>'+noSp+'</b></td></tr><tr><td>Sentences</td><td><b>'+sent+'</b></td></tr><tr><td>Paragraphs</td><td><b>'+paras+'</b></td></tr><tr><td>Reading time</td><td><b>'+(words===0?'—':mins<1?'under a minute':'~'+Math.max(1,Math.round(mins))+' min')+'</b></td></tr></table>');
+  }
+  $('#wc-t',b).oninput=count;count();
+}},
+{id:'p-case',cat:'prod',icon:'🔠',name:'Case Converter',tag:'UPPER, lower, Title & more cases',build:function(b){
+  b.innerHTML=lab('Your text')+ta('cs-t','Type here…',4)+
+   '<div><button class="yt-ghost" data-k="upper">UPPERCASE</button><button class="yt-ghost" data-k="lower">lowercase</button><button class="yt-ghost" data-k="title">Title Case</button><button class="yt-ghost" data-k="sent">Sentence case</button><button class="yt-ghost" data-k="alt">aLtErNaTiNg</button><button class="yt-ghost" data-k="inv">iNVERSE</button></div>'+
+   lab('Result')+ta('cs-r','',4)+'<br><button class="yt-ghost" id="cs-cp">Copy Result</button>';
+  function conv(k,t){
+    if(k==='upper')return t.toUpperCase();
+    if(k==='lower')return t.toLowerCase();
+    if(k==='title')return t.toLowerCase().replace(/(?:^|[\s."'(])\S/g,function(c){return c.toUpperCase();});
+    if(k==='sent')return t.toLowerCase().replace(/(^\s*[a-z])|([.!?]\s*[a-z])/g,function(c){return c.toUpperCase();});
+    if(k==='alt'){var o='',up=true;for(var i=0;i<t.length;i++){var c=t[i];if(/[a-zA-Z]/.test(c)){o+=up?c.toUpperCase():c.toLowerCase();up=!up;}else{o+=c;}}return o;}
+    if(k==='inv'){var o2='';for(var j=0;j<t.length;j++){var d=t[j];o2+=(d===d.toUpperCase()?d.toLowerCase():d.toUpperCase());}return o2;}
+    return t;
+  }
+  $$('[data-k]',b).forEach(function(x){x.onclick=function(){$('#cs-r',b).value=conv(x.getAttribute('data-k'),$('#cs-t',b).value);};});
+  $('#cs-cp',b).onclick=function(){copyTxt($('#cs-r',b).value,this);};
+}},
+{id:'p-json',cat:'prod',icon:'🧩',name:'JSON Formatter',tag:'Validate & pretty-print JSON',build:function(b){
+  b.innerHTML=lab('JSON input')+ta('js-t','{"name":"example","tags":["a","b"]}',5)+
+   lab('Indent')+'<select class="yt-in" id="js-i"><option value="2">2 spaces</option><option value="4">4 spaces</option><option value="tab">Tab</option></select>'+
+   btn('Format & Validate','','js-go')+resBox('js-r');
+  $('#js-go',b).onclick=function(){
+    var t=$('#js-t',b).value;
+    try{
+      var o=JSON.parse(t),ind=$('#js-i',b).value;
+      var pretty=JSON.stringify(o,null,ind==='tab'?'\t':+ind);
+      showRes('js-r','<span class="yt-ok">✓ Valid JSON</span><pre>'+esc(pretty)+'</pre><br><button class="yt-ghost" id="js-cp">Copy Formatted</button>');
+      $('#js-cp',b).onclick=function(){copyTxt(pretty,this);};
+    }catch(e){showRes('js-r','<span class="yt-bad">✗ Invalid JSON:</span> '+esc(e.message));}
+  };
+}},
+{id:'p-pass',cat:'prod',icon:'🔐',name:'Password Generator',tag:'Strong random passwords + strength meter',build:function(b){
+  b.innerHTML=lab('Length: <span id="pg-lv">16</span>')+'<input type="range" id="pg-l" min="6" max="64" value="16">'+
+   '<label class="yt-chk"><input type="checkbox" id="pg-u" checked> Uppercase (A-Z)</label>'+
+   '<label class="yt-chk"><input type="checkbox" id="pg-lo" checked> Lowercase (a-z)</label>'+
+   '<label class="yt-chk"><input type="checkbox" id="pg-d" checked> Digits (0-9)</label>'+
+   '<label class="yt-chk"><input type="checkbox" id="pg-s" checked> Symbols (!@#…)</label>'+
+   '<label class="yt-chk"><input type="checkbox" id="pg-a"> Exclude ambiguous (0 O 1 l I)</label>'+
+   btn('Generate','','pg-go')+resBox('pg-r');
+  $('#pg-l',b).oninput=function(){$('#pg-lv',b).textContent=this.value;};
+  $('#pg-go',b).onclick=function(){
+    var len=+$('#pg-l',b).value,pool='';
+    if($('#pg-u',b).checked)pool+='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    if($('#pg-lo',b).checked)pool+='abcdefghijklmnopqrstuvwxyz';
+    if($('#pg-d',b).checked)pool+='0123456789';
+    if($('#pg-s',b).checked)pool+='!@#$%^&*()-_=+[]{};:,.<>?';
+    if($('#pg-a',b).checked)pool=pool.replace(/[0O1lI]/g,'');
+    if(!pool){showRes('pg-r','Select at least one character set.');return;}
+    var rnd=new Uint32Array(len);crypto.getRandomValues(rnd);var pw='';
+    for(var i=0;i<len;i++)pw+=pool[rnd[i]%pool.length];
+    var ent=Math.log2(pool.length)*len;
+    var s=ent>90?'Very strong 💪':ent>60?'Strong 👍':ent>40?'Medium 🙂':'Weak ⚠️';
+    showRes('pg-r','<pre style="font-size:17px;">'+esc(pw)+'</pre><div class="yt-note">Entropy: '+Math.round(ent)+' bits — '+s+'</div><br><button class="yt-ghost" id="pg-cp">Copy Password</button>');
+    $('#pg-cp',b).onclick=function(){copyTxt(pw,this);};
+  };
+}},
+{id:'p-unit',cat:'prod',icon:'📏',name:'Unit Converter',tag:'Length, weight, temp, data & more',build:function(b){
+  var U={
+    'Length':{m:1,km:1000,cm:0.01,mm:0.001,mi:1609.344,yd:0.9144,ft:0.3048,in:0.0254},
+    'Weight':{kg:1,g:0.001,lb:0.453592,oz:0.0283495},
+    'Data':{B:1,KB:1024,MB:1048576,GB:1073741824,TB:1099511627776},
+    'Speed':{'m/s':1,'km/h':0.277778,mph:0.44704},
+    'Time':{sec:1,min:60,hr:3600,day:86400}
+  };
+  b.innerHTML=lab('Category')+'<select class="yt-in" id="uc-c">'+Object.keys(U).map(function(k){return '<option>'+k+'</option>';}).join('')+'<option>Temperature</option></select>'+
+   lab('Value')+'<input class="yt-in" id="uc-v" type="number" value="1" step="any">'+
+   '<div class="yt-row"><div>'+lab('From')+'<select class="yt-in" id="uc-f"></select></div><div>'+lab('To')+'<select class="yt-in" id="uc-t"></select></div></div>'+
+   btn('Convert','','uc-go')+resBox('uc-r');
+  function fill(){
+    var c=$('#uc-c',b).value,f=$('#uc-f',b),t=$('#uc-t',b);
+    var units=c==='Temperature'?['°C','°F','K']:Object.keys(U[c]);
+    f.innerHTML=units.map(function(u){return '<option>'+esc(u)+'</option>';}).join('');
+    t.innerHTML=units.map(function(u){return '<option>'+esc(u)+'</option>';}).join('');
+    t.selectedIndex=1;
+  }
+  function toC(v,u){return u==='°C'?v:(u==='°F'?(v-32)*5/9:v-273.15);}
+  function fromC(v,u){return u==='°C'?v:(u==='°F'?v*9/5+32:v+273.15);}
+  $('#uc-c',b).onchange=fill;fill();
+  $('#uc-go',b).onclick=function(){
+    var c=$('#uc-c',b).value,v=+$('#uc-v',b).value,f=$('#uc-f',b).value,t=$('#uc-t',b).value,r;
+    if(c==='Temperature'){r=fromC(toC(v,f),t);}
+    else{r=v*U[c][f]/U[c][t];}
+    var rr=(Math.abs(r)<0.0001&&r!==0)?r.toExponential(3):+r.toFixed(6);
+    showRes('uc-r','<div class="yt-score" style="font-size:26px;">'+esc(String(rr))+' '+esc(t)+'</div><div class="yt-note">'+esc(String(v))+' '+esc(f)+' = '+esc(String(rr))+' '+esc(t)+'</div>');
+  };
+}},
+{id:'p-zip',cat:'prod',icon:'🗂️',name:'File to ZIP',tag:'Bundle files into a ZIP download',build:function(b){
+  b.innerHTML=lab('Choose files (multiple)')+'<input class="yt-in" type="file" id="zp-f" multiple>'+lab('ZIP name')+inp('zp-n','archive')+btn('Create ZIP','','zp-go')+resBox('zp-r');
+  $('#zp-go',b).onclick=function(){
+    var fs=$('#zp-f',b).files;if(!fs.length){showRes('zp-r','Choose at least one file.');return;}
+    if(typeof JSZip==='undefined'){showRes('zp-r','ZIP library failed to load — check your connection and retry.');return;}
+    showRes('zp-r','⏳ Zipping…');
+    var zip=new JSZip();
+    for(var i=0;i<fs.length;i++)zip.file(fs[i].name,fs[i]);
+    zip.generateAsync({type:'blob'}).then(function(bl){
+      dl(bl,($('#zp-n',b).value.trim()||'archive')+'.zip');
+      showRes('zp-r','<span class="yt-ok">Done!</span> '+fs.length+' file(s) zipped — '+fmtB(bl.size)+'.');
+    }).catch(function(e){showRes('zp-r','ZIP failed: '+esc(e.message||e));});
+  };
+}},
+{id:'p-pm',cat:'prod',icon:'💌',name:'Private Message',tag:'Styled notes to copy or download',build:function(b){
+  b.innerHTML=lab('Title')+inp('pm-t','A note for you')+lab('Message')+ta('pm-m','Write your message…',4)+
+   lab('Style')+'<select class="yt-in" id="pm-s"><option>Classic letter</option><option>Simple note</option></select>'+
+   btn('Preview','','pm-go')+resBox('pm-r');
+  $('#pm-go',b).onclick=function(){
+    var t=$('#pm-t',b).value.trim()||'A note for you',m=$('#pm-m',b).value.trim();
+    if(!m){showRes('pm-r','Write a message first.');return;}
+    var st=$('#pm-s',b).value;
+    var card=st==='Classic letter'
+      ?'<div style="background:#fffdf5;border:1px solid #e8dfc8;border-radius:10px;padding:22px;font-family:Georgia,serif;"><h3 style="margin:0 0 12px;border-bottom:1px solid #e8dfc8;padding-bottom:8px;">'+esc(t)+'</h3><p style="white-space:pre-wrap;">'+esc(m)+'</p></div>'
+      :'<div style="background:#f6f8ff;border-left:4px solid #e62117;border-radius:8px;padding:18px;"><b>'+esc(t)+'</b><p style="white-space:pre-wrap;margin:8px 0 0;">'+esc(m)+'</p></div>';
+    showRes('pm-r',card+'<br><button class="yt-ghost" id="pm-cp">Copy Text</button> <button class="yt-ghost" id="pm-dl">Download .txt</button>');
+    $('#pm-cp',b).onclick=function(){copyTxt(t+'\n\n'+m,this);};
+    $('#pm-dl',b).onclick=function(){dl(new Blob([t+'\n\n'+m],{type:'text/plain'}),'note.txt');};
+  };
+}},
+{id:'p-love',cat:'prod',icon:'❤️',name:'Love Percentage',tag:'Just-for-fun compatibility score',build:function(b){
+  b.innerHTML=note('100% for fun — not a real prediction 😉')+
+   '<div class="yt-row"><div>'+lab('Name 1')+inp('lv-a','Romeo')+'</div><div>'+lab('Name 2')+inp('lv-b','Juliet')+'</div></div>'+
+   btn('Calculate ❤️','','lv-go')+resBox('lv-r');
+  $('#lv-go',b).onclick=function(){
+    var a=$('#lv-a',b).value.trim(),c=$('#lv-b',b).value.trim();
+    if(!a||!c){showRes('lv-r','Enter both names.');return;}
+    var s=a.toLowerCase()+c.toLowerCase(),h=0;
+    for(var i=0;i<s.length;i++){h=((h*31)+s.charCodeAt(i))>>>0;}
+    var pct=h%101;
+    var msg=pct>90?'A legendary match! 🌟':pct>70?'Strong vibes! 💕':pct>50?'Good potential 🙂':pct>30?'Needs some work 🌱':'Just friends energy 🤝';
+    showRes('lv-r','<div style="text-align:center;"><div class="yt-score">'+pct+'%</div><b>'+esc(a)+' ❤️ '+esc(c)+'</b><br>'+msg+'<div class="yt-bar" style="max-width:300px;margin:12px auto;"><div style="width:'+pct+'%"></div></div></div>');
+  };
+}},
+/* ---------- FINANCE ---------- */
+{id:'f-emi',cat:'fin',icon:'🏦',name:'EMI Calculator',tag:'Loan EMI, interest & total payable',build:function(b){
+  b.innerHTML='<div class="yt-row"><div>'+lab('Loan amount (₹)')+'<input class="yt-in" id="em-p" type="number" value="500000" min="0"></div><div>'+lab('Annual interest %')+'<input class="yt-in" id="em-r" type="number" step="0.1" value="9" min="0"></div></div>'+
+   lab('Tenure (years)')+'<input class="yt-in" id="em-y" type="number" value="5" min="1">'+btn('Calculate','','em-go')+resBox('em-r2');
+  $('#em-go',b).onclick=function(){
+    var P=+$('#em-p',b).value||0,R=+$('#em-r',b).value||0,Y=+$('#em-y',b).value||0;
+    if(P<=0||Y<=0){showRes('em-r2','Enter a valid loan amount and tenure.');return;}
+    var r=R/1200,n=Y*12;
+    var emi=r>0?P*r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1):P/n;
+    function inr(x){return '₹'+Math.round(x).toLocaleString('en-IN');}
+    showRes('em-r2','<table class="yt-tbl"><tr><td>Monthly EMI</td><td><b>'+inr(emi)+'</b></td></tr><tr><td>Total interest</td><td>'+inr(emi*n-P)+'</td></tr><tr><td>Total payable</td><td>'+inr(emi*n)+'</td></tr></table>');
+  };
+}},
+{id:'f-sip',cat:'fin',icon:'📈',name:'SIP / Compound Interest',tag:'Project your SIP growth over time',build:function(b){
+  b.innerHTML='<div class="yt-row"><div>'+lab('Monthly investment (₹)')+'<input class="yt-in" id="si-m" type="number" value="5000" min="0"></div><div>'+lab('Expected return %/yr')+'<input class="yt-in" id="si-r" type="number" step="0.5" value="12" min="0"></div></div>'+
+   lab('Years')+'<input class="yt-in" id="si-y" type="number" value="10" min="1">'+btn('Project Growth','','si-go')+resBox('si-r2');
+  $('#si-go',b).onclick=function(){
+    var M=+$('#si-m',b).value||0,R=+$('#si-r',b).value||0,Y=+$('#si-y',b).value||0;
+    if(M<=0||Y<=0){showRes('si-r2','Enter valid values.');return;}
+    var i=R/1200,n=Y*12;
+    var fv=i>0?M*((Math.pow(1+i,n)-1)/i)*(1+i):M*n;
+    var inv=M*n;
+    function inr(x){return '₹'+Math.round(x).toLocaleString('en-IN');}
+    var pct=Math.round(inv/fv*100);
+    showRes('si-r2','<div class="yt-score" style="font-size:26px;">'+inr(fv)+'</div><div class="yt-bar"><div style="width:'+pct+'%"></div></div><table class="yt-tbl"><tr><td>You invest</td><td><b>'+inr(inv)+'</b></td></tr><tr><td>Est. gains</td><td class="yt-ok"><b>'+inr(fv-inv)+'</b></td></tr><tr><td>Total value</td><td><b>'+inr(fv)+'</b></td></tr></table>'+note('Projection only — markets vary. Not financial advice.'));
+  };
+}},
+{id:'f-biz',cat:'fin',icon:'💼',name:'Business Calculators',tag:'Margin, ROI & break-even in one place',build:function(b){
+  b.innerHTML=lab('Calculator')+'<select class="yt-in" id="bz-k"><option value="m">Profit margin</option><option value="r">ROI</option><option value="b">Break-even</option></select><div id="bz-f"></div>'+btn('Calculate','','bz-go')+resBox('bz-r');
+  function fields(){
+    var k=$('#bz-k',b).value,f=$('#bz-f',b);
+    if(k==='m')f.innerHTML='<div class="yt-row"><div>'+lab('Revenue (₹)')+'<input class="yt-in" id="bz-a" type="number" value="100000"></div><div>'+lab('Cost (₹)')+'<input class="yt-in" id="bz-c" type="number" value="70000"></div></div>';
+    else if(k==='r')f.innerHTML='<div class="yt-row"><div>'+lab('Final value (₹)')+'<input class="yt-in" id="bz-a" type="number" value="150000"></div><div>'+lab('Cost (₹)')+'<input class="yt-in" id="bz-c" type="number" value="100000"></div></div>';
+    else f.innerHTML='<div class="yt-row"><div>'+lab('Fixed costs (₹)')+'<input class="yt-in" id="bz-a" type="number" value="50000"></div><div>'+lab('Price / unit (₹)')+'<input class="yt-in" id="bz-c" type="number" value="500"></div></div>'+lab('Variable cost / unit (₹)')+'<input class="yt-in" id="bz-v" type="number" value="300">';
+  }
+  $('#bz-k',b).onchange=fields;fields();
+  $('#bz-go',b).onclick=function(){
+    var k=$('#bz-k',b).value,A=+$('#bz-a',b).value||0,C=+$('#bz-c',b).value||0,h='';
+    if(k==='m'){if(A<=0){showRes('bz-r','Revenue must be above 0.');return;}var mg=(A-C)/A*100,mk=C>0?(A-C)/C*100:0;
+      h='<table class="yt-tbl"><tr><td>Profit</td><td><b>₹'+Math.round(A-C).toLocaleString('en-IN')+'</b></td></tr><tr><td>Profit margin</td><td class="yt-ok"><b>'+mg.toFixed(1)+'%</b></td></tr><tr><td>Markup</td><td><b>'+mk.toFixed(1)+'%</b></td></tr></table>';}
+    else if(k==='r'){if(C<=0){showRes('bz-r','Cost must be above 0.');return;}var roi=(A-C)/C*100;
+      h='<div class="yt-score" style="font-size:26px;">'+roi.toFixed(1)+'%</div><div class="yt-note">Return on investment</div>';}
+    else{var V=+$('#bz-v',b).value||0;if(C<=V){showRes('bz-r','Price per unit must be above variable cost.');return;}var be=A/(C-V);
+      h='<div class="yt-score" style="font-size:26px;">'+Math.ceil(be)+' units</div><div class="yt-note">Sell this many units to break even (≈ ₹'+Math.round(Math.ceil(be)*C).toLocaleString('en-IN')+' revenue).</div>';}
+    showRes('bz-r',h);
+  };
+}},
+{id:'f-calc',cat:'fin',icon:'🧮',name:'Simple Calculator',tag:'Quick everyday calculator',build:function(b){
+  b.innerHTML='<input class="yt-in" id="sc-d" readonly style="font-size:26px;text-align:right;background:#f6f6f8;" value="0"><div id="sc-k" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px;"></div>'+note('Tip: click the panel and type with your keyboard too.');
+  var keys=['C','⌫','%','÷','7','8','9','×','4','5','6','−','1','2','3','+','±','0','.','='];
+  var disp=$('#sc-d',b),kd=$('#sc-k',b),expr='',fresh=true;
+  function show(v){disp.value=v;}
+  function press(k){
+    if(k==='C'){expr='';show('0');fresh=true;return;}
+    if(k==='⌫'){expr=expr.slice(0,-1);show(expr||'0');if(!expr)fresh=true;return;}
+    if(k==='='){
+      var e=expr.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/%/g,'/100');
+      if(!/^[0-9+\-*/.() ]+$/.test(e)||!/[0-9]/.test(e)){show('Error');expr='';fresh=true;return;}
+      try{var r=Function('"use strict";return ('+e+')')();
+        if(typeof r!=='number'||!isFinite(r)){show('Error');expr='';}
+        else{var s=String(+r.toFixed(10));show(s);expr=s;}
+      }catch(err){show('Error');expr='';}
+      fresh=true;return;
+    }
+    if(k==='±'){
+      var e2=expr.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');
+      if(/^[0-9+\-*/.() ]+$/.test(e2)&&/[0-9]/.test(e2)){try{var r2=Function('"use strict";return ('+e2+')')();if(isFinite(r2)){expr=String(-(+r2.toFixed(10)));show(expr);fresh=true;}}catch(err){}}
+      return;
+    }
+    if(fresh){if(/[0-9.]/.test(k)){expr='';}fresh=false;}
+    expr+=k;show(expr);
+  }
+  keys.forEach(function(k){
+    var x=document.createElement('button');
+    x.textContent=k;x.className='yt-ghost';x.style.margin='0';x.style.padding='14px 0';x.style.fontSize='17px';
+    if(k==='='){x.style.background='#e62117';x.style.color='#fff';}
+    else if('÷×−+⌫C%±'.indexOf(k)>=0){x.style.background='#fdeceb';}
+    x.onclick=function(){press(k);};
+    kd.appendChild(x);
+  });
+  b.tabIndex=-1;
+  b.onkeydown=function(e){
+    var m={Enter:'=',Backspace:'⌫',Escape:'C','*':'×','/':'÷','-':'−','+':'+','%':'%','.':'.','(':'(',')':')'};
+    var k=m[e.key]!==undefined?m[e.key]:((/^[0-9]$/.test(e.key))?e.key:null);
+    if(k){e.preventDefault();press(k);}
+  };
+  setTimeout(function(){try{b.focus({preventScroll:true});}catch(e){b.focus();}},150);
+}},
+/* ---------- WEB & SEO ---------- */
+{id:'w-audit',cat:'web',icon:'🌐',name:'Website Audit',tag:'Score your site’s SEO checklist',build:function(b){
+  var items=['Mobile-friendly design','HTTPS enabled','Fast loading (under 3s)','Descriptive title tags','Meta descriptions on pages','XML sitemap submitted','robots.txt configured','Image alt text used','Clear internal linking','No broken links','Google Search Console verified','Analytics installed'];
+  b.innerHTML=note('Tick each item that is TRUE for your website. This scores the data you enter — it does not scan your site.')+
+   items.map(function(t){return '<label class="yt-chk"><input type="checkbox" class="wa-c"> '+esc(t)+'</label>';}).join('')+
+   btn('Calculate Score','','wa-go')+resBox('wa-r');
+  $('#wa-go',b).onclick=function(){
+    var boxes=$$('.wa-c',b),done=boxes.filter(function(x){return x.checked;}).length;
+    var score=Math.round(done/boxes.length*100);
+    var g=score>=85?'Excellent — well optimized 🏆':score>=65?'Good foundation 👍':score>=40?'Needs attention 🔧':'Major gaps 🚨';
+    showRes('wa-r','<div class="yt-score">'+score+'/100</div><b>'+g+'</b><div class="yt-bar"><div style="width:'+score+'%"></div></div><div class="yt-note">'+done+' of '+boxes.length+' checks passed. Work through the unchecked items above.</div>');
+  };
+}},
+{id:'w-tech',cat:'web',icon:'⚙️',name:'Technical SEO Suite',tag:'Advanced SEO health checklist',build:function(b){
+  var items=['Canonical tags set','Structured data (schema) added','Custom 404 page','301 redirects without chains','Core Web Vitals passing','Clean URL structure','Open Graph tags','Twitter cards','Server responds fast','No duplicate content','Pagination handled correctly','Hreflang (if multi-language)'];
+  b.innerHTML=note('Tick each item that is TRUE for your website. This scores the data you enter — it does not scan your site.')+
+   items.map(function(t){return '<label class="yt-chk"><input type="checkbox" class="wt-c"> '+esc(t)+'</label>';}).join('')+
+   btn('Calculate Score','','wt-go')+resBox('wt-r');
+  $('#wt-go',b).onclick=function(){
+    var boxes=$$('.wt-c',b),done=boxes.filter(function(x){return x.checked;}).length;
+    var score=Math.round(done/boxes.length*100);
+    var g=score>=85?'Technically excellent 🏆':score>=65?'Solid 👍':score>=40?'Gaps to fix 🔧':'Needs an overhaul 🚨';
+    showRes('wt-r','<div class="yt-score">'+score+'/100</div><b>'+g+'</b><div class="yt-bar"><div style="width:'+score+'%"></div></div><div class="yt-note">'+done+' of '+boxes.length+' checks passed.</div>');
+  };
+}},
+{id:'w-ig',cat:'web',icon:'📸',name:'Instagram AI Caption',tag:'Caption + hashtag ideas for posts',build:function(b){
+  b.innerHTML=lab('Post topic')+inp('ig-t','e.g. sunset at the beach')+lab('Vibe')+'<select class="yt-in" id="ig-v"><option>Aesthetic</option><option>Funny</option><option>Motivational</option><option>Minimal</option></select>'+btn('Generate','','ig-go')+resBox('ig-r');
+  var bank={
+    'Aesthetic':['Golden hour hits different ✨\n{t}.','Soft skies, softer moments 🌅\n{t} diaries.','Chasing light, finding peace.\n{t}.'],
+    'Funny':['{T}… because adulting is hard 😂','My {t} era beats everything else.','Warning: excessive {t} content ahead ⚠️'],
+    'Motivational':['Every sunset proves endings can be beautiful. {T} 🌅','Grow through what you go through. 🌱\n{t}.','Your only limit is you. {T} mode: ON 🔥'],
+    'Minimal':['{t}.','{T} — enough said.','Less, but better. {t}.']
+  };
+  $('#ig-go',b).onclick=function(){
+    var t=$('#ig-t',b).value.trim()||'today',v=$('#ig-v',b).value,T=t.charAt(0).toUpperCase()+t.slice(1);
+    var tags=t.toLowerCase().split(/\s+/).filter(function(w){return w.length>2;}).slice(0,4).map(function(w){return '#'+w;}).join(' ')+' #instagood #reels #viral #explorepage';
+    var caps=bank[v].map(function(c){return c.replace(/\{t\}/g,t).replace(/\{T\}/g,T);});
+    showRes('ig-r',caps.map(function(c,i){return '<div style="margin-bottom:10px;padding:10px;background:#fff;border-radius:8px;">'+esc(c).replace(/\n/g,'<br>')+'<br><span class="yt-note">'+esc(tags)+'</span><br><button class="yt-ghost" data-ig="'+i+'">Copy Caption</button></div>';}).join(''));
+    $$('#ig-r [data-ig]',b).forEach(function(x){x.onclick=function(){copyTxt(caps[+x.getAttribute('data-ig')]+'\n\n'+tags,x);};});
+  };
+}}
+];
+/* init */
+renderPills();renderGrid();
+})();
+</script>
